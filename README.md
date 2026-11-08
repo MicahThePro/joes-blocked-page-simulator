@@ -30,7 +30,7 @@ After all 52 are complete, the game switches into a replayable post-completion c
 5. Try to discover all endings.
 
 What happens behind the scenes when you start:
-- The GIF detaches and falls with physics.
+- The GIF detaches, shrinks down to a small size, and can still be tossed around.
 - Joe appears in front of it.
 - A dialogue bubble appears.
 - TTS prompt may appear first time.
@@ -248,10 +248,11 @@ Format used below:
 
 20. **The Historian** (`the-historian`)
 - Path: `3. Tell me about yourself first`
+- Note: The first time you finish this route, the conversation ends here.
 
 21. **The Ghost** (`the-ghost`)
 - Path: `3. Tell me about yourself first`
-- Note: This shares a route theme with The Historian but branches by deeper state/flow.
+- Note: Shares The Historian's route and branches by deeper state. Unlock The Historian first by playing this path once. Then play the same path again, after The Historian is already in your endings. Joe continues past that ending, the page corrupts, and the conversation breaks into The Ghost.
 
 22. **The Listener** (`the-listener`)
 - Path: `4. What do you do when nobody's here? -> 2. Just curious`

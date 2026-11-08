@@ -6277,7 +6277,8 @@
                         {
                             "action": "saveEnding",
                             "id": "the-historian",
-                            "name": "The Historian"
+                            "name": "The Historian",
+                            "continueIfOwned": true
                         },
                         {
                             "action": "corruptPage",

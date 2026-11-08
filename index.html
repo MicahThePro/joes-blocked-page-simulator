@@ -161,6 +161,18 @@
   var dragging = false, dragOffX, dragOffY;
   var prevMouseX, prevMouseY, velHistX = [], velHistY = [];
   var animId;
+  // The blocking gif is large enough to cover Joe (and it is stacked above him).
+  // On the first grab, shrink it toward a small size so Joe stays visible.
+  var shrinking = false;
+  var shrinkStart = 0;
+  var shrinkFromW = 0, shrinkFromH = 0, shrinkToW = 0, shrinkToH = 0;
+  var shrinkAnchorX = 0, shrinkAnchorY = 0;
+  var shrinkRaf = 0;
+  var dragMoved = false;
+  var restAfterShrink = false;
+  var resting = false;
+  var SHRINK_MS = 1500;
+  var SHRINK_TARGET_W = 150;
   var GRAVITY = 1800; // px/s^2
   var BOUNCE = 0.38;
   var FRICTION = 0.82;
@@ -368,7 +380,7 @@
     var gy = r.top + gifH / 2 - 40;
     guy = document.createElement('div');
     guy.id = 'joe-guy';
-    guy.style.cssText = 'position:fixed;z-index:99997;pointer-events:none;left:' + gx + 'px;top:' + gy + 'px;';
+    guy.style.cssText = 'position:fixed;z-index:100000;pointer-events:none;left:' + gx + 'px;top:' + gy + 'px;';
     guy.innerHTML = '<svg width="40" height="80" viewBox="0 0 40 80" xmlns="http://www.w3.org/2000/svg">'+
       '<circle cx="20" cy="12" r="10" fill="#555"/>'+
       '<circle class="joe-eye-l" cx="16.5" cy="10" r="1.8" fill="#ddd"/>'+
@@ -382,7 +394,7 @@
       '</svg>';
     document.body.appendChild(guy);
     bubble = document.createElement('div');
-    bubble.style.cssText = 'position:fixed;background:#fff;border:2px solid #333;border-radius:10px;padding:8px 14px;font-size:14px;font-family:sans-serif;color:#333;max-width:220px;text-align:center;display:none;z-index:99998;box-shadow:2px 2px 6px rgba(0,0,0,0.25);pointer-events:auto;word-break:normal;overflow-wrap:break-word;';
+    bubble.style.cssText = 'position:fixed;background:#fff;border:2px solid #333;border-radius:10px;padding:8px 14px;font-size:14px;font-family:sans-serif;color:#333;max-width:220px;text-align:center;display:none;z-index:100001;box-shadow:2px 2px 6px rgba(0,0,0,0.25);pointer-events:auto;word-break:normal;overflow-wrap:break-word;';
     var textNode = document.createElement('span');
     bubble.appendChild(textNode);
     var choicesDiv = document.createElement('div');
@@ -1128,6 +1140,10 @@
           localStorage.setItem('joe-endings', JSON.stringify(_endArr));
           updateEndingsBtn();
           showEndingUnlocked(entry.name, _closeDialogue, entry.id);
+        } else if (entry.continueIfOwned) {
+          // Already owned: keep going. The Historian uses this so a repeat
+          // of that route can reach The Ghost. Every other saveEnding still stops.
+          next();
         } else {
           _closeDialogue();
         }
@@ -1839,6 +1855,93 @@
 
   function getRect() { return el.getBoundingClientRect(); }
 
+  function placeJoeWithGif() {
+    if (!guy) return;
+    var r = el.getBoundingClientRect();
+    var gx = r.left + r.width / 2 - 20;
+    var gy = r.top + Math.max(0, r.height - 78);
+    gx = Math.max(4, Math.min(window.innerWidth - 44, gx));
+    gy = Math.max(4, Math.min(window.innerHeight - 88, gy));
+    guy.style.left = gx + 'px';
+    guy.style.top = gy + 'px';
+    syncGuyBubble();
+  }
+
+  function applyGifSize(w, h) {
+    var prevW = parseFloat(el.style.width) || w;
+    var prevH = parseFloat(el.style.height) || h;
+    el.style.width = w + 'px';
+    el.style.height = h + 'px';
+    if (dragging) {
+      var cursorX = posX + dragOffX;
+      var cursorY = posY + dragOffY;
+      if (prevW > 0) dragOffX *= w / prevW;
+      if (prevH > 0) dragOffY *= h / prevH;
+      posX = cursorX - dragOffX;
+      posY = cursorY - dragOffY;
+    } else {
+      posX = shrinkAnchorX - w / 2;
+      posY = shrinkAnchorY - h / 2;
+    }
+    if (w <= window.innerWidth) posX = Math.max(0, Math.min(window.innerWidth - w, posX));
+    if (h <= window.innerHeight) posY = Math.max(0, Math.min(window.innerHeight - h, posY));
+    shrinkAnchorX = posX + w / 2;
+    shrinkAnchorY = posY + h / 2;
+    el.style.left = posX + 'px';
+    el.style.top = posY + 'px';
+  }
+
+  function shrinkEase(t) {
+    // Ease in and out so the shrink reads as slow instead of snapping small.
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  function stepShrink(now) {
+    if (!shrinking) return;
+    var t = Math.min(1, (now - shrinkStart) / SHRINK_MS);
+    var e = shrinkEase(t);
+    var w = shrinkFromW + (shrinkToW - shrinkFromW) * e;
+    var h = shrinkFromH + (shrinkToH - shrinkFromH) * e;
+    applyGifSize(w, h);
+    placeJoeWithGif();
+    if (t < 1) {
+      shrinkRaf = requestAnimationFrame(stepShrink);
+      return;
+    }
+    shrinking = false;
+    el.dataset.shrunk = '1';
+    applyGifSize(shrinkToW, shrinkToH);
+    placeJoeWithGif();
+    // A plain click should leave the small gif where Joe is. Gravity would
+    // otherwise drop it onto the corner buttons. A real drag can still toss it.
+    if (restAfterShrink && !dragMoved && !dragging) {
+      resting = true;
+      velX = 0;
+      velY = 0;
+      state = 'falling';
+    }
+  }
+
+  function startShrink() {
+    if (shrinking || el.dataset.shrunk === '1') return;
+    var r = getRect();
+    if (!(r.width > SHRINK_TARGET_W + 8) || r.height < 1) {
+      el.dataset.shrunk = '1';
+      placeJoeWithGif();
+      return;
+    }
+    shrinkFromW = r.width;
+    shrinkFromH = r.height;
+    shrinkToW = SHRINK_TARGET_W;
+    shrinkToH = Math.max(1, Math.round(r.height * (SHRINK_TARGET_W / r.width)));
+    shrinkAnchorX = r.left + r.width / 2;
+    shrinkAnchorY = r.top + r.height / 2;
+    shrinking = true;
+    shrinkStart = performance.now();
+    cancelAnimationFrame(shrinkRaf);
+    shrinkRaf = requestAnimationFrame(stepShrink);
+  }
+
   function detach() {
     if (state === 'static') {
       var r = getRect();
@@ -1864,6 +1967,7 @@
       document.body.appendChild(el);
       createGuy();
     }
+    if (state === 'static') startShrink();
   }
 
   function askTtsIfNeeded(callback) {
@@ -1906,9 +2010,22 @@
   function launch() {
     if (state === 'dragging' || state === 'flying') return;
     detach();
-    velX = (Math.random() - 0.5) * 200;
-    velY = -900;
-    state = 'flying';
+    // Let the gif shrink in place first. A full-size toss covers Joe completely.
+    if (shrinking) {
+      if (!dragMoved) {
+        velX = 0;
+        velY = 0;
+        restAfterShrink = true;
+      } else {
+        restAfterShrink = false;
+      }
+      state = 'falling';
+    } else {
+      restAfterShrink = false;
+      velX = (Math.random() - 0.5) * 200;
+      velY = -900;
+      state = 'flying';
+    }
     lastTime = performance.now();
     cancelAnimationFrame(animId);
     animId = requestAnimationFrame(physicsLoop);
@@ -1916,7 +2033,11 @@
   }
 
   function physicsLoop(now) {
-    if (state === 'dragging') return;
+    if (state === 'dragging' || resting) return;
+    if (shrinking) {
+      animId = requestAnimationFrame(physicsLoop);
+      return;
+    }
     var dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
     velY += GRAVITY * dt;
@@ -1965,10 +2086,13 @@
   // Drag
   el.addEventListener('mousedown', function(e) {
     if (state === 'static') {
+      restAfterShrink = true;
       detach();
       setTimeout(startDialogue, 2000);
     }
     cancelAnimationFrame(animId);
+    dragMoved = false;
+    resting = false;
     state = 'dragging';
     dragging = true;
     var r = el.getBoundingClientRect();
@@ -1985,6 +2109,7 @@
     posY = e.clientY - dragOffY;
     el.style.left = posX + 'px';
     el.style.top  = posY + 'px';
+    if (Math.abs(e.clientX - prevMouseX) + Math.abs(e.clientY - prevMouseY) > 2) dragMoved = true;
     velHistX.push(e.clientX - prevMouseX);
     velHistY.push(e.clientY - prevMouseY);
     if (velHistX.length > 6) { velHistX.shift(); velHistY.shift(); }
